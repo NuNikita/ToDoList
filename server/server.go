@@ -17,6 +17,10 @@ func StartServer(port int, pool *pgxpool.Pool) {
 
 	mux.HandleFunc("POST /tasks", handler.AddTask)
 	mux.HandleFunc("GET /tasks", handler.GetTasks)
+	mux.HandleFunc("GET /tasks/{id}", handler.GetTask)
+	mux.HandleFunc("DELETE /tasks/{id}", handler.DeleteTask)
+	mux.HandleFunc("PATCH /tasks/{id}/description", handler.EditDescriptionTask)
+	mux.HandleFunc("PATCH /tasks/{id}/complete", handler.CompleteTask)
 
 	portStr := ":" + strconv.Itoa(port)
 

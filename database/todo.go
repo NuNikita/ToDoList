@@ -3,9 +3,13 @@ package database
 import (
 	"ToDoList/models"
 	"context"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrTaskNotFound error = errors.New("task not found")
 
 func CreateTodosTable(pool *pgxpool.Pool) error {
 	query := `
@@ -66,10 +70,99 @@ func GetTasks(ctx context.Context, creator string, pool *pgxpool.Pool) ([]models
 
 }
 
+func GetTask(ctx context.Context, id int, pool *pgxpool.Pool) (models.Task, error) {
+	query := `
+				SELECT id, creator, title, description, completed, created_at
+				FROM todos
+				WHERE id = $1
+`
+
+	var task models.Task
+	row := pool.QueryRow(ctx, query, id)
+
+	err := row.Scan(
+		&task.Id,
+		&task.Creator,
+		&task.Title,
+		&task.Description,
+		&task.Completed,
+		&task.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Task{}, ErrTaskNotFound
+		}
+		return models.Task{}, err
+	}
+
+	return task, nil
+}
+
 func AddTask(ctx context.Context, creator, title, descr string, pool *pgxpool.Pool) error {
-	query := `INSERT INTO todos (title, description, creator) VALUES ($1, $2, $3)`
+	query := `
+	INSERT INTO todos (title, description, creator)
+	VALUES ($1, $2, $3)
+`
 
 	_, err := pool.Exec(ctx, query, title, descr, creator)
 
 	return err
+}
+
+func DeleteTask(ctx context.Context, id int, pool *pgxpool.Pool) error {
+	query := `
+		DELETE FROM todos
+		WHERE id=$1
+`
+	result, err := pool.Exec(ctx, query, id)
+
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrTaskNotFound
+	}
+
+	return nil
+}
+
+func EditDescriptionTask(ctx context.Context, id int, descr string, pool *pgxpool.Pool) error {
+	query := `
+		UPDATE todos
+		SET description = $1
+		WHERE ID = $2
+`
+	result, err := pool.Exec(ctx, query, descr, id)
+
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrTaskNotFound
+	}
+
+	return nil
+}
+
+func CompleteTask(ctx context.Context, id int, pool *pgxpool.Pool) error {
+	query := `
+		UPDATE todos
+		SET completed = NOT completed
+		WHERE ID = $1
+`
+	result, err := pool.Exec(ctx, query, id)
+
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrTaskNotFound
+	}
+
+	return nil
+
 }
