@@ -3,33 +3,32 @@ package handlers
 import (
 	"ToDoList/database"
 	"ToDoList/models"
+	"ToDoList/service"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Handler struct {
-	pool *pgxpool.Pool
+	serv service.Service
 }
 
-type GetCreator struct {
+type GetFromJsonCreator struct {
 	Creator string `json:"creator"`
 }
 
-type GetDescription struct {
+type GetFromJsonDescription struct {
 	Description string `json:"description"`
 }
 
-func CreateHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool}
+func CreateHandler(serv service.Service) *Handler {
+	return &Handler{serv: serv}
 }
 
 func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
-	var request GetCreator
+	var request GetFromJsonCreator
 
 	err := json.NewDecoder(r.Body).Decode(&request)
 
@@ -39,7 +38,7 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := database.GetTasks(r.Context(), request.Creator, h.pool)
+	tasks, err := h.serv.GetTasks(r.Context(), request.Creator)
 
 	if err != nil {
 		w.WriteHeader(500)
@@ -69,11 +68,11 @@ func (h *Handler) AddTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = database.AddTask(r.Context(), task.Creator, task.Title, task.Description, h.pool)
+	err = h.serv.AddTask(r.Context(), task.Creator, task.Title, task.Description)
 
 	if err != nil {
-		w.WriteHeader(500)
-		w.Write([]byte("cant add task to data base"))
+		w.WriteHeader(400)
+		w.Write([]byte("cant add task to data base: " + err.Error()))
 		return
 	}
 
@@ -93,7 +92,7 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = database.DeleteTask(r.Context(), id, h.pool)
+	err = h.serv.DeleteTask(r.Context(), id)
 
 	if err != nil {
 		if errors.Is(err, database.ErrTaskNotFound) {
@@ -125,7 +124,7 @@ func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var description GetDescription
+	var description GetFromJsonDescription
 
 	err = json.NewDecoder(r.Body).Decode(&description)
 
@@ -135,7 +134,7 @@ func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = database.EditDescriptionTask(r.Context(), id, description.Description, h.pool)
+	err = h.serv.EditDescriptionTask(r.Context(), id, description.Description)
 
 	if err != nil {
 		if errors.Is(err, database.ErrTaskNotFound) {
@@ -165,7 +164,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = database.CompleteTask(r.Context(), id, h.pool)
+	err = h.serv.CompleteTask(r.Context(), id)
 
 	if err != nil {
 		if errors.Is(err, database.ErrTaskNotFound) {
@@ -181,7 +180,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task, err := database.GetTask(r.Context(), id, h.pool)
+	task, err := h.serv.GetTask(r.Context(), id)
 
 	if err != nil {
 		w.WriteHeader(200)
@@ -193,7 +192,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request)  {
+func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 
 	id, err := strconv.Atoi(idStr)
@@ -204,7 +203,7 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request)  {
 		return
 	}
 
-	task, err := database.GetTask(r.Context(), id, h.pool)
+	task, err := h.serv.GetTask(r.Context(), id)
 
 	if err != nil {
 		if errors.Is(err, database.ErrTaskNotFound) {
@@ -221,8 +220,8 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request)  {
 
 	err = json.NewEncoder(w).Encode(task)
 
-	if err != nil{
-		fmt.Println("error:",err)
+	if err != nil {
+		fmt.Println("error:", err)
 	}
 
 }

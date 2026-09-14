@@ -2,16 +2,15 @@ package server
 
 import (
 	"ToDoList/server/handlers"
+	"ToDoList/service"
 	"fmt"
 	"net/http"
 	"strconv"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func StartServer(port int, pool *pgxpool.Pool) {
+func StartServer(port int, serv service.Service) {
 
-	handler := handlers.CreateHandler(pool)
+	handler := handlers.CreateHandler(serv)
 
 	mux := http.NewServeMux()
 
@@ -21,9 +20,7 @@ func StartServer(port int, pool *pgxpool.Pool) {
 	mux.HandleFunc("DELETE /tasks/{id}", handler.DeleteTask)
 	mux.HandleFunc("PATCH /tasks/{id}/description", handler.EditDescriptionTask)
 	mux.HandleFunc("PATCH /tasks/{id}/complete", handler.CompleteTask)
-
 	portStr := ":" + strconv.Itoa(port)
-
 	fmt.Println("The server is starting on port", port)
 
 	if err := http.ListenAndServe(portStr, mux); err != nil {

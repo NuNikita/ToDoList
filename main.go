@@ -3,6 +3,7 @@ package main
 import (
 	"ToDoList/database"
 	"ToDoList/server"
+	"ToDoList/service"
 	"fmt"
 )
 
@@ -25,6 +26,8 @@ func main() {
 		return
 	}
 
-	server.StartServer(port, pool)
+	serv := service.CreateService(pool)
+
+	server.StartServer(port, serv)
 
 }
