@@ -1,58 +1,179 @@
 package service
 
 import (
+	"ToDoList/auth"
 	"ToDoList/database"
 	"ToDoList/models"
 	"context"
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Service struct {
-	pool *pgxpool.Pool
+	base *database.Base
 }
 
-func CreateService(pool *pgxpool.Pool) Service {
-	return Service{pool: pool}
+func CreateService(base *database.Base) *Service {
+	return &Service{base: base}
 }
 
-var ErrEmptyCreator = errors.New("empty name")
+func hashPassword(passw string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(passw), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func checkPassword(hash, passw string) bool {
+	byteHash := []byte(hash)
+	bytePassw := []byte(passw)
+	err := bcrypt.CompareHashAndPassword(byteHash, bytePassw)
+
+	if err != nil {
+		return false
+	}
+	return true
+
+}
+
 var ErrEmptyTitle = errors.New("empty title")
+var ErrWrongPassword = errors.New("wrong password")
+var ErrEmptyField = errors.New("empty field")
+var ErrNotYourTask = errors.New("not your task")
 
-func (s *Service) GetTasks(ctx context.Context, creator string) ([]models.Task, error) {
-	if strings.TrimSpace(creator) == "" {
-		return nil, ErrEmptyCreator
+func (s *Service) isYourTask(ctx context.Context, id int, token string) (bool, error) {
+	userId, err := auth.ParseToken(token)
+
+	if err != nil {
+		return false, err
 	}
 
-	tasks, err := database.GetTasks(ctx, creator, s.pool)
+	task, err := s.base.GetTask(ctx, id)
+
+	if err != nil {
+		return false, err
+	}
+
+	return task.UserId == userId, nil
+
+}
+
+func (s *Service) GetTasks(ctx context.Context, token string) ([]models.Task, error) {
+	userId, err := auth.ParseToken(token)
+
+	if err != nil {
+		return nil, err
+	}
+
+	tasks, err := s.base.GetTasks(ctx, userId)
+
 	return tasks, err
 }
 
-func (s *Service) GetTask(ctx context.Context, id int) (models.Task, error) {
-	return database.GetTask(ctx, id, s.pool)
+func (s *Service) GetTask(ctx context.Context, id int, token string) (models.Task, error) {
+
+	userId, err := auth.ParseToken(token)
+
+	if err != nil {
+		return models.Task{}, err
+	}
+
+	task, err := s.base.GetTask(ctx, id)
+
+	if err != nil {
+		return models.Task{}, err
+	}
+
+	if task.UserId == userId {
+		return task, nil
+	}
+
+	return models.Task{}, ErrNotYourTask
+
 }
 
-func (s *Service) AddTask(ctx context.Context, creator, title, descr string) error {
-	if strings.TrimSpace(creator) == "" {
-		return ErrEmptyCreator
-	}
+func (s *Service) AddTask(ctx context.Context, token, title, descr string) error {
+
 	if strings.TrimSpace(title) == "" {
 		return ErrEmptyTitle
 	}
 
-	return database.AddTask(ctx, creator, title, descr, s.pool)
+	userId, err := auth.ParseToken(token)
+
+	if err != nil {
+		return err
+	}
+
+	return s.base.AddTask(ctx, userId, title, descr)
 }
 
-func (s *Service) DeleteTask(ctx context.Context, id int) error {
-	return database.DeleteTask(ctx, id, s.pool)
+func (s *Service) withOwnershipCheck(ctx context.Context, id int, token string, action func() error) error {
+	res, err := s.isYourTask(ctx, id, token)
+	if err != nil {
+		return err
+	}
+
+	if !res {
+		return ErrNotYourTask
+	}
+	return action()
+
 }
 
-func (s *Service) EditDescriptionTask(ctx context.Context, id int, descr string) error {
-	return database.EditDescriptionTask(ctx, id, descr, s.pool)
+func (s *Service) DeleteTask(ctx context.Context, id int, token string) error {
+
+	return s.withOwnershipCheck(ctx, id, token, func() error {
+		return s.base.DeleteTask(ctx, id)
+	})
+
 }
 
-func (s *Service) CompleteTask(ctx context.Context, id int) error {
-	return database.CompleteTask(ctx, id, s.pool)
+func (s *Service) EditDescriptionTask(ctx context.Context, id int, descr, token string) error {
+	return s.withOwnershipCheck(ctx, id, token, func() error {
+		return s.base.EditDescriptionTask(ctx, id, descr)
+	})
+
+}
+
+func (s *Service) CompleteTask(ctx context.Context, id int, token string) error {
+	return s.withOwnershipCheck(ctx, id, token, func() error {
+		return s.base.CompleteTask(ctx, id)
+	})
+
+}
+
+func (s *Service) RegisterUser(ctx context.Context, login, passw string) error {
+	if strings.TrimSpace(login) == "" {
+		return ErrEmptyField
+	}
+	if strings.TrimSpace(passw) == "" {
+		return ErrEmptyField
+	}
+
+	passwHash, err := hashPassword(passw)
+
+	if err != nil {
+		return err
+	}
+
+	return s.base.RegisterUser(ctx, login, passwHash)
+}
+
+func (s *Service) LoginUser(ctx context.Context, login, passw string) (string, error) {
+	user, err := s.base.GetUser(ctx, login)
+
+	if err != nil {
+		return "", err
+	}
+
+	res := checkPassword(user.PasswHash, passw)
+
+	if !res {
+		return "", ErrWrongPassword
+	}
+	return auth.GenerateToken(user.Id)
+
 }

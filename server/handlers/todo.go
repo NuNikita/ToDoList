@@ -4,41 +4,55 @@ import (
 	"ToDoList/database"
 	"ToDoList/models"
 	"ToDoList/service"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type Handler struct {
-	serv service.Service
-}
-
-type GetFromJsonCreator struct {
-	Creator string `json:"creator"`
+	serv *service.Service
 }
 
 type GetFromJsonDescription struct {
 	Description string `json:"description"`
 }
 
-func CreateHandler(serv service.Service) *Handler {
+func CreateHandler(serv *service.Service) *Handler {
 	return &Handler{serv: serv}
 }
 
+func MiddlewareParseToken(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+
+		const prefix = "Bearer "
+
+		if !strings.HasPrefix(authHeader, prefix) {
+			w.WriteHeader(400)
+			w.Write([]byte("Bad token"))
+			return
+		}
+
+		tokenStr := strings.TrimPrefix(authHeader, prefix)
+
+		ctx := context.WithValue(r.Context(), "token", tokenStr)
+
+		r = r.WithContext(ctx)
+
+		next(w, r)
+
+	})
+}
+
 func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
-	var request GetFromJsonCreator
 
-	err := json.NewDecoder(r.Body).Decode(&request)
+	tokenStr := r.Context().Value("token").(string)
 
-	if err != nil {
-		w.WriteHeader(400)
-		w.Write([]byte("cant get tasks"))
-		return
-	}
-
-	tasks, err := h.serv.GetTasks(r.Context(), request.Creator)
+	tasks, err := h.serv.GetTasks(r.Context(), tokenStr)
 
 	if err != nil {
 		w.WriteHeader(500)
@@ -53,10 +67,11 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("cant encode tasks to json"))
 		return
 	}
-
 }
 
 func (h *Handler) AddTask(w http.ResponseWriter, r *http.Request) {
+
+	tokenStr := r.Context().Value("token").(string)
 
 	var task models.Task
 
@@ -68,7 +83,7 @@ func (h *Handler) AddTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.serv.AddTask(r.Context(), task.Creator, task.Title, task.Description)
+	err = h.serv.AddTask(r.Context(), tokenStr, task.Title, task.Description)
 
 	if err != nil {
 		w.WriteHeader(400)
@@ -82,6 +97,9 @@ func (h *Handler) AddTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
+
+	tokenStr := r.Context().Value("token").(string)
+
 	idStr := r.PathValue("id")
 
 	id, err := strconv.Atoi(idStr)
@@ -92,10 +110,15 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.serv.DeleteTask(r.Context(), id)
+	err = h.serv.DeleteTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, database.ErrTaskNotFound) {
+		if errors.Is(err, service.ErrNotYourTask) {
+			w.WriteHeader(404)
+			fmt.Println(err)
+			fmt.Fprint(w, "It's not your task")
+			return
+		} else if errors.Is(err, database.ErrTaskNotFound) {
 			w.WriteHeader(404)
 			fmt.Println(err)
 			fmt.Fprint(w, "There is no such id")
@@ -114,6 +137,9 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
+
+	tokenStr := r.Context().Value("token").(string)
+
 	idStr := r.PathValue("id")
 
 	id, err := strconv.Atoi(idStr)
@@ -134,10 +160,15 @@ func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.serv.EditDescriptionTask(r.Context(), id, description.Description)
+	err = h.serv.EditDescriptionTask(r.Context(), id, description.Description, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, database.ErrTaskNotFound) {
+		if errors.Is(err, service.ErrNotYourTask) {
+			w.WriteHeader(404)
+			fmt.Println(err)
+			fmt.Fprint(w, "It's not your task")
+			return
+		} else if errors.Is(err, database.ErrTaskNotFound) {
 			w.WriteHeader(404)
 			fmt.Println(err)
 			fmt.Fprint(w, "There is no such id")
@@ -154,6 +185,9 @@ func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
+
+	tokenStr := r.Context().Value("token").(string)
+
 	idStr := r.PathValue("id")
 
 	id, err := strconv.Atoi(idStr)
@@ -164,10 +198,15 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.serv.CompleteTask(r.Context(), id)
+	err = h.serv.CompleteTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, database.ErrTaskNotFound) {
+		if errors.Is(err, service.ErrNotYourTask) {
+			w.WriteHeader(404)
+			fmt.Println(err)
+			fmt.Fprint(w, "It's not your task")
+			return
+		} else if errors.Is(err, database.ErrTaskNotFound) {
 			w.WriteHeader(404)
 			fmt.Println(err)
 			fmt.Fprint(w, "There is no such id")
@@ -180,7 +219,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task, err := h.serv.GetTask(r.Context(), id)
+	task, err := h.serv.GetTask(r.Context(), id, tokenStr)
 
 	if err != nil {
 		w.WriteHeader(200)
@@ -193,6 +232,8 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
+	tokenStr := r.Context().Value("token").(string)
+
 	idStr := r.PathValue("id")
 
 	id, err := strconv.Atoi(idStr)
@@ -203,10 +244,16 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.serv.GetTask(r.Context(), id)
+	task, err := h.serv.GetTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, database.ErrTaskNotFound) {
+
+		if errors.Is(err, service.ErrNotYourTask) {
+			w.WriteHeader(404)
+			fmt.Println(err)
+			fmt.Fprint(w, "It's not your task")
+			return
+		} else if errors.Is(err, database.ErrTaskNotFound) {
 			w.WriteHeader(404)
 			fmt.Println(err)
 			fmt.Fprint(w, "There is no such id")

@@ -11,15 +11,25 @@ import (
 
 var ErrTaskNotFound error = errors.New("task not found")
 
+type Base struct {
+	pool *pgxpool.Pool
+}
+
+func CreateBasePool(pool *pgxpool.Pool) *Base {
+	return &Base{pool: pool}
+}
+
 func CreateTodosTable(pool *pgxpool.Pool) error {
 	query := `
 	CREATE TABLE IF NOT EXISTS todos (
 			id SERIAL PRIMARY KEY,
-			creator TEXT NOT NULL,
 			title TEXT NOT NULL,
 			description TEXT,
 			completed BOOLEAN NOT NULL DEFAULT FALSE,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			user_id INTEGER NOT NULL,
+	                                 
+			FOREIGN KEY (user_id) REFERENCES users(id)
 		);`
 
 	_, err := pool.Exec(context.Background(), query)
@@ -28,15 +38,15 @@ func CreateTodosTable(pool *pgxpool.Pool) error {
 
 }
 
-func GetTasks(ctx context.Context, creator string, pool *pgxpool.Pool) ([]models.Task, error) {
+func (b *Base) GetTasks(ctx context.Context, userId int) ([]models.Task, error) {
 	query := `
-				SELECT id, creator, title, description, completed, created_at
+				SELECT id, title, description, completed, created_at, user_id
 				FROM todos
-				WHERE creator = $1
+				WHERE user_id = $1
 				ORDER BY created_at DESC
 `
 
-	rows, err := pool.Query(ctx, query, creator)
+	rows, err := b.pool.Query(ctx, query, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -48,11 +58,11 @@ func GetTasks(ctx context.Context, creator string, pool *pgxpool.Pool) ([]models
 		var task models.Task
 		err = rows.Scan(
 			&task.Id,
-			&task.Creator,
 			&task.Title,
 			&task.Description,
 			&task.Completed,
 			&task.CreatedAt,
+			&task.UserId,
 		)
 
 		if err != nil {
@@ -70,23 +80,23 @@ func GetTasks(ctx context.Context, creator string, pool *pgxpool.Pool) ([]models
 
 }
 
-func GetTask(ctx context.Context, id int, pool *pgxpool.Pool) (models.Task, error) {
+func (b *Base) GetTask(ctx context.Context, id int) (models.Task, error) {
 	query := `
-				SELECT id, creator, title, description, completed, created_at
+				SELECT id, title, description, completed, created_at, user_id
 				FROM todos
 				WHERE id = $1
 `
 
 	var task models.Task
-	row := pool.QueryRow(ctx, query, id)
+	row := b.pool.QueryRow(ctx, query, id)
 
 	err := row.Scan(
 		&task.Id,
-		&task.Creator,
 		&task.Title,
 		&task.Description,
 		&task.Completed,
 		&task.CreatedAt,
+		&task.UserId,
 	)
 
 	if err != nil {
@@ -99,23 +109,23 @@ func GetTask(ctx context.Context, id int, pool *pgxpool.Pool) (models.Task, erro
 	return task, nil
 }
 
-func AddTask(ctx context.Context, creator, title, descr string, pool *pgxpool.Pool) error {
+func (b *Base) AddTask(ctx context.Context, userId int, title, descr string) error {
 	query := `
-	INSERT INTO todos (title, description, creator)
+	INSERT INTO todos (title, description, user_id)
 	VALUES ($1, $2, $3)
 `
 
-	_, err := pool.Exec(ctx, query, title, descr, creator)
+	_, err := b.pool.Exec(ctx, query, title, descr, userId)
 
 	return err
 }
 
-func DeleteTask(ctx context.Context, id int, pool *pgxpool.Pool) error {
+func (b *Base) DeleteTask(ctx context.Context, id int) error {
 	query := `
 		DELETE FROM todos
 		WHERE id=$1
 `
-	result, err := pool.Exec(ctx, query, id)
+	result, err := b.pool.Exec(ctx, query, id)
 
 	if err != nil {
 		return err
@@ -128,13 +138,13 @@ func DeleteTask(ctx context.Context, id int, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func EditDescriptionTask(ctx context.Context, id int, descr string, pool *pgxpool.Pool) error {
+func (b *Base) EditDescriptionTask(ctx context.Context, id int, descr string) error {
 	query := `
 		UPDATE todos
 		SET description = $1
 		WHERE ID = $2
 `
-	result, err := pool.Exec(ctx, query, descr, id)
+	result, err := b.pool.Exec(ctx, query, descr, id)
 
 	if err != nil {
 		return err
@@ -147,13 +157,13 @@ func EditDescriptionTask(ctx context.Context, id int, descr string, pool *pgxpoo
 	return nil
 }
 
-func CompleteTask(ctx context.Context, id int, pool *pgxpool.Pool) error {
+func (b *Base) CompleteTask(ctx context.Context, id int) error {
 	query := `
 		UPDATE todos
 		SET completed = NOT completed
 		WHERE ID = $1
 `
-	result, err := pool.Exec(ctx, query, id)
+	result, err := b.pool.Exec(ctx, query, id)
 
 	if err != nil {
 		return err
@@ -164,5 +174,42 @@ func CompleteTask(ctx context.Context, id int, pool *pgxpool.Pool) error {
 	}
 
 	return nil
+
+}
+
+func (b *Base) GetIdTasks(ctx context.Context, userId int) ([]int, error) {
+	query := `
+		SELECT id
+		FROM todos
+		WHERE user_id = $1
+`
+	rows, err := b.pool.Query(ctx, query, userId)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var ids []int
+
+	for rows.Next() {
+
+		var id int
+		err = rows.Scan(&id)
+
+		if err != nil {
+			return nil, err
+		}
+
+		ids = append(ids, id)
+
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return ids, nil
 
 }

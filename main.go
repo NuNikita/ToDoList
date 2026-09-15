@@ -7,6 +7,8 @@ import (
 	"fmt"
 )
 
+// Обернуть ошибки все
+
 func main() {
 	port := 8080
 
@@ -19,6 +21,13 @@ func main() {
 
 	defer pool.Close()
 
+	err = database.CreateUsersTable(pool)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	err = database.CreateTodosTable(pool)
 
 	if err != nil {
@@ -26,7 +35,9 @@ func main() {
 		return
 	}
 
-	serv := service.CreateService(pool)
+	base := database.CreateBasePool(pool)
+
+	serv := service.CreateService(base)
 
 	server.StartServer(port, serv)
 
