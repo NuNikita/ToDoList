@@ -8,7 +8,7 @@ import (
 	"strconv"
 )
 
-func StartServer(port int, serv *service.Service) {
+func StartServer(port int, serv *service.Service) error {
 
 	handler := handlers.CreateHandler(serv)
 
@@ -27,8 +27,8 @@ func StartServer(port int, serv *service.Service) {
 	fmt.Println("The server is starting on port", port)
 
 	if err := http.ListenAndServe(portStr, mux); err != nil {
-		fmt.Println("error:", err)
-		return
+		return fmt.Errorf("listen on %s: %w", portStr, err)
 	}
 
+	return nil
 }

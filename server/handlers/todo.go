@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"ToDoList/auth"
 	"ToDoList/database"
 	"ToDoList/models"
 	"ToDoList/service"
@@ -13,15 +14,41 @@ import (
 	"strings"
 )
 
+type serviceApi interface {
+	GetTasks(ctx context.Context, token string) ([]models.Task, error)
+	GetTask(ctx context.Context, id int, token string) (models.Task, error)
+	AddTask(ctx context.Context, token, title, descr string) error
+	DeleteTask(ctx context.Context, id int, token string) error
+	EditDescriptionTask(ctx context.Context, id int, descr, token string) error
+	CompleteTask(ctx context.Context, id int, token string) error
+	LoginUser(ctx context.Context, login, passw string) (string, error)
+	RegisterUser(ctx context.Context, login, passw string) error
+}
+
 type Handler struct {
-	serv *service.Service
+	serv serviceApi
 }
 
 type GetFromJsonDescription struct {
 	Description string `json:"description"`
 }
 
-func CreateHandler(serv *service.Service) *Handler {
+func writeServiceError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, auth.ErrInvalidToken):
+		http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+	case errors.Is(err, service.ErrEmptyTitle), errors.Is(err, service.ErrEmptyField):
+		http.Error(w, "invalid request data", http.StatusBadRequest)
+	case errors.Is(err, service.ErrNotYourTask):
+		http.Error(w, "access to this task is forbidden", http.StatusForbidden)
+	case errors.Is(err, database.ErrTaskNotFound):
+		http.Error(w, "task not found", http.StatusNotFound)
+	default:
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}
+}
+
+func CreateHandler(serv serviceApi) *Handler {
 	return &Handler{serv: serv}
 }
 
@@ -31,9 +58,8 @@ func MiddlewareParseToken(next http.HandlerFunc) http.HandlerFunc {
 
 		const prefix = "Bearer "
 
-		if !strings.HasPrefix(authHeader, prefix) {
-			w.WriteHeader(400)
-			w.Write([]byte("Bad token"))
+		if !strings.HasPrefix(authHeader, prefix) || strings.TrimSpace(strings.TrimPrefix(authHeader, prefix)) == "" {
+			http.Error(w, "authorization token is required", http.StatusUnauthorized)
 			return
 		}
 
@@ -55,16 +81,14 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	tasks, err := h.serv.GetTasks(r.Context(), tokenStr)
 
 	if err != nil {
-		w.WriteHeader(500)
-		w.Write([]byte("cant get tasks from data base"))
+		writeServiceError(w, err)
 		return
 	}
 
-	err = json.NewEncoder(w).Encode(tasks)
-
-	if err != nil {
-		w.WriteHeader(500)
-		w.Write([]byte("cant encode tasks to json"))
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tasks); err != nil {
+		// Headers may already be sent by Encoder; the error is still handled instead of ignored.
+		fmt.Println("encode tasks response:", err)
 		return
 	}
 }
@@ -78,20 +102,18 @@ func (h *Handler) AddTask(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&task)
 
 	if err != nil {
-		w.WriteHeader(400)
-		w.Write([]byte("cant add task"))
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
 	err = h.serv.AddTask(r.Context(), tokenStr, task.Title, task.Description)
 
 	if err != nil {
-		w.WriteHeader(400)
-		w.Write([]byte("cant add task to data base: " + err.Error()))
+		writeServiceError(w, err)
 		return
 	}
 
-	w.WriteHeader(200)
+	w.WriteHeader(http.StatusCreated)
 	s := fmt.Sprintf("Task \"%s\" was added", task.Title)
 	w.Write([]byte(s))
 }
@@ -105,34 +127,18 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 
 	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprint(w, "id must be integer")
+		http.Error(w, "task id must be an integer", http.StatusBadRequest)
 		return
 	}
 
 	err = h.serv.DeleteTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, service.ErrNotYourTask) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "It's not your task")
-			return
-		} else if errors.Is(err, database.ErrTaskNotFound) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "There is no such id")
-			return
-		} else {
-
-			w.WriteHeader(500)
-			fmt.Fprint(w, "Couldn't delete task")
-			return
-		}
+		writeServiceError(w, err)
+		return
 	}
 
-	w.WriteHeader(200)
-	fmt.Fprintf(w, "Task with id %d was deleted", id)
+	w.WriteHeader(http.StatusNoContent)
 
 }
 
@@ -145,8 +151,7 @@ func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 
 	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprint(w, "id must be integer")
+		http.Error(w, "task id must be an integer", http.StatusBadRequest)
 		return
 	}
 
@@ -155,30 +160,15 @@ func (h *Handler) EditDescriptionTask(w http.ResponseWriter, r *http.Request) {
 	err = json.NewDecoder(r.Body).Decode(&description)
 
 	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprint(w, "Error")
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
 	err = h.serv.EditDescriptionTask(r.Context(), id, description.Description, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, service.ErrNotYourTask) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "It's not your task")
-			return
-		} else if errors.Is(err, database.ErrTaskNotFound) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "There is no such id")
-			return
-		} else {
-
-			w.WriteHeader(500)
-			fmt.Fprint(w, "Couldn't delete task")
-			return
-		}
+		writeServiceError(w, err)
+		return
 	}
 
 	fmt.Fprintf(w, "Description of the task with id %d was edited: %s", id, description.Description)
@@ -193,41 +183,28 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 
 	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprint(w, "id must be integer")
+		http.Error(w, "task id must be an integer", http.StatusBadRequest)
 		return
 	}
 
 	err = h.serv.CompleteTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-		if errors.Is(err, service.ErrNotYourTask) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "It's not your task")
-			return
-		} else if errors.Is(err, database.ErrTaskNotFound) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "There is no such id")
-			return
-		} else {
-
-			w.WriteHeader(500)
-			fmt.Fprint(w, "Couldn't complete task")
-			return
-		}
+		writeServiceError(w, err)
+		return
 	}
 
 	task, err := h.serv.GetTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-		w.WriteHeader(200)
-		fmt.Fprintf(w, "Task with id %d, completion changed", id)
+		writeServiceError(w, err)
 		return
 	}
 
-	fmt.Fprintf(w, "Task with id %d, completed: %v", id, task.Completed)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		fmt.Println("encode completed task response:", err)
+	}
 
 }
 
@@ -239,36 +216,21 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 
 	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprint(w, "id must be integer")
+		http.Error(w, "task id must be an integer", http.StatusBadRequest)
 		return
 	}
 
 	task, err := h.serv.GetTask(r.Context(), id, tokenStr)
 
 	if err != nil {
-
-		if errors.Is(err, service.ErrNotYourTask) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "It's not your task")
-			return
-		} else if errors.Is(err, database.ErrTaskNotFound) {
-			w.WriteHeader(404)
-			fmt.Println(err)
-			fmt.Fprint(w, "There is no such id")
-			return
-		} else {
-			w.WriteHeader(500)
-			fmt.Fprint(w, "Couldn't get task")
-			return
-		}
+		writeServiceError(w, err)
+		return
 	}
 
-	err = json.NewEncoder(w).Encode(task)
-
-	if err != nil {
-		fmt.Println("error:", err)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		// Headers may already be sent by Encoder; the error is still handled instead of ignored.
+		fmt.Println("encode task response:", err)
 	}
 
 }

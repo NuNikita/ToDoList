@@ -3,8 +3,17 @@ package database
 import (
 	"ToDoList/models"
 	"context"
+	"errors"
+	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var (
+	ErrUserAlreadyExists = errors.New("user already exists")
+	ErrUserNotFound      = errors.New("user not found")
 )
 
 func CreateUsersTable(pool *pgxpool.Pool) error {
@@ -17,7 +26,11 @@ func CreateUsersTable(pool *pgxpool.Pool) error {
 
 	_, err := pool.Exec(context.Background(), query)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("create users table: %w", err)
+	}
+
+	return nil
 
 }
 
@@ -28,7 +41,15 @@ func (b *Base) RegisterUser(ctx context.Context, login, passwHash string) error 
 `
 	_, err := b.pool.Exec(ctx, query, login, passwHash)
 
-	return err
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("%w: %q", ErrUserAlreadyExists, login)
+		}
+		return fmt.Errorf("register user %q: %w", login, err)
+	}
+
+	return nil
 }
 
 func (b *Base) GetUser(ctx context.Context, login string) (models.UserDB, error) {
@@ -43,7 +64,10 @@ func (b *Base) GetUser(ctx context.Context, login string) (models.UserDB, error)
 	err := row.Scan(&user.Id, &user.Login, &user.PasswHash)
 
 	if err != nil {
-		return models.UserDB{}, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.UserDB{}, ErrUserNotFound
+		}
+		return models.UserDB{}, fmt.Errorf("get user %q: %w", login, err)
 	}
 
 	return user, nil

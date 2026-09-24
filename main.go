@@ -1,15 +1,21 @@
 package main
 
 import (
+	"ToDoList/auth"
 	"ToDoList/database"
 	"ToDoList/server"
 	"ToDoList/service"
 	"fmt"
 )
 
-// Обернуть ошибки все
-
 func main() {
+
+	err := auth.CheckSecretKey()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	port := 8080
 
 	pool, err := database.Connect()
@@ -39,6 +45,8 @@ func main() {
 
 	serv := service.CreateService(base)
 
-	server.StartServer(port, serv)
+	if err := server.StartServer(port, serv); err != nil {
+		fmt.Println(err)
+	}
 
 }

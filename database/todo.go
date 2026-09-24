@@ -4,6 +4,7 @@ import (
 	"ToDoList/models"
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,13 +35,17 @@ func CreateTodosTable(pool *pgxpool.Pool) error {
 
 	_, err := pool.Exec(context.Background(), query)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("create todos table: %w", err)
+	}
+
+	return nil
 
 }
 
 func (b *Base) GetTasks(ctx context.Context, userId int) ([]models.Task, error) {
 	query := `
-				SELECT id, title, description, completed, created_at, user_id
+				SELECT id, title, description, completed, created_at
 				FROM todos
 				WHERE user_id = $1
 				ORDER BY created_at DESC
@@ -48,7 +53,7 @@ func (b *Base) GetTasks(ctx context.Context, userId int) ([]models.Task, error) 
 
 	rows, err := b.pool.Query(ctx, query, userId)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query tasks for user %d: %w", userId, err)
 	}
 	defer rows.Close()
 
@@ -62,18 +67,17 @@ func (b *Base) GetTasks(ctx context.Context, userId int) ([]models.Task, error) 
 			&task.Description,
 			&task.Completed,
 			&task.CreatedAt,
-			&task.UserId,
 		)
 
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan task for user %d: %w", userId, err)
 		}
 
 		tasks = append(tasks, task)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("iterate tasks for user %d: %w", userId, err)
 	}
 
 	return tasks, nil
@@ -103,7 +107,7 @@ func (b *Base) GetTask(ctx context.Context, id int) (models.Task, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Task{}, ErrTaskNotFound
 		}
-		return models.Task{}, err
+		return models.Task{}, fmt.Errorf("get task %d: %w", id, err)
 	}
 
 	return task, nil
@@ -117,7 +121,11 @@ func (b *Base) AddTask(ctx context.Context, userId int, title, descr string) err
 
 	_, err := b.pool.Exec(ctx, query, title, descr, userId)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("add task for user %d: %w", userId, err)
+	}
+
+	return nil
 }
 
 func (b *Base) DeleteTask(ctx context.Context, id int) error {
@@ -128,7 +136,7 @@ func (b *Base) DeleteTask(ctx context.Context, id int) error {
 	result, err := b.pool.Exec(ctx, query, id)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("delete task %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -147,7 +155,7 @@ func (b *Base) EditDescriptionTask(ctx context.Context, id int, descr string) er
 	result, err := b.pool.Exec(ctx, query, descr, id)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("edit description for task %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -166,7 +174,7 @@ func (b *Base) CompleteTask(ctx context.Context, id int) error {
 	result, err := b.pool.Exec(ctx, query, id)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("toggle completion for task %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -186,7 +194,7 @@ func (b *Base) GetIdTasks(ctx context.Context, userId int) ([]int, error) {
 	rows, err := b.pool.Query(ctx, query, userId)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query task IDs for user %d: %w", userId, err)
 	}
 
 	defer rows.Close()
@@ -199,7 +207,7 @@ func (b *Base) GetIdTasks(ctx context.Context, userId int) ([]int, error) {
 		err = rows.Scan(&id)
 
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan task ID for user %d: %w", userId, err)
 		}
 
 		ids = append(ids, id)
@@ -207,7 +215,7 @@ func (b *Base) GetIdTasks(ctx context.Context, userId int) ([]int, error) {
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("iterate task IDs for user %d: %w", userId, err)
 	}
 
 	return ids, nil

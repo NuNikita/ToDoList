@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -13,16 +14,16 @@ func Connect() (*pgxpool.Pool, error) {
 
 	pool, err := pgxpool.New(
 		ctx,
-		"postgres://postgres:1234@localhost:5432/ToDoBase",
+		os.Getenv("DATABASE_URL"),
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("не удалось создать пул: %w", err)
+		return nil, fmt.Errorf("create database connection pool: %w", err)
 	}
 
 	if err = pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("не удалось подключиться к бд: %w", err)
+		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
 	fmt.Println("Еее подключились")

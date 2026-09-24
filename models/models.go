@@ -8,7 +8,7 @@ type Task struct {
 	Description string    `json:"description"`
 	Completed   bool      `json:"completed"`
 	CreatedAt   time.Time `json:"created_at"`
-	UserId      int       `json:"user_id"`
+	UserId      int       `json:"-"`
 }
 
 type User struct {
