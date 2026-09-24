@@ -6,9 +6,15 @@ import (
 	"ToDoList/server"
 	"ToDoList/service"
 	"fmt"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		fmt.Println("не удалось прочитать .env:", err)
+		return
+	}
 
 	err := auth.CheckSecretKey()
 	if err != nil {

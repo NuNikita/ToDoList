@@ -9,8 +9,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var secretKey = []byte(os.Getenv("JWT_SECRET"))
-
 var ErrInvalidToken = errors.New("invalid token")
 
 type Claims struct {
@@ -19,6 +17,7 @@ type Claims struct {
 }
 
 func CheckSecretKey() error {
+	var secretKey = []byte(os.Getenv("JWT_SECRET"))
 	if len(secretKey) == 0 {
 		return errors.New("secret key is required")
 	}
@@ -27,6 +26,7 @@ func CheckSecretKey() error {
 }
 
 func GenerateToken(userID int) (string, error) {
+	var secretKey = []byte(os.Getenv("JWT_SECRET"))
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -46,6 +46,7 @@ func GenerateToken(userID int) (string, error) {
 }
 
 func ParseToken(tokenStr string) (int, error) {
+	var secretKey = []byte(os.Getenv("JWT_SECRET"))
 	claims := &Claims{}
 
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
